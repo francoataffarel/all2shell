@@ -1,5 +1,9 @@
 # All2Shell ⚡
 
+<p align="center">
+  <img src="assets/all2shell-banner.png" alt="All2Shell banner showing Java, Nginx, WordPress and PHP defensive modules" width="100%">
+</p>
+
 > One CLI to rule your shell workflows — composable, inspectable and safe by default.
 
 [![CI](https://github.com/francoataffarel/all2shell/actions/workflows/ci.yml/badge.svg)](https://github.com/francoataffarel/all2shell/actions/workflows/ci.yml)
