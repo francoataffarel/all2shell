@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ALL2SHELL_VERSION="0.1.0"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+MODULE_DIR="${ALL2SHELL_MODULE_DIR:-$ROOT_DIR/modules}"
+
+die() { printf 'all2shell: %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+
+usage() {
+  cat <<'EOF'
+     _    _ _ ____  _          _ _
+    / \  | | / ___|| |__   ___| | |
+   / _ \ | | \___ \| '_ \ / _ \ | |
+  / ___ \| | |___) | | | |  __/ | |
+ /_/   \_\_|_|____/|_| |_|\___|_|_|
+
+One CLI. Every workflow. Zero mystery.
+
+Usage:
+  all2shell list                         List available modules
+  all2shell doctor                       Check local dependencies
+  all2shell run <module> [arguments...]  Run a module
+  all2shell help [module]                Show help
+  all2shell version                      Print version
+
+Environment:
+  ALL2SHELL_MODULE_DIR  Override the modules directory
+EOF
+}
+
+module_path() {
+  local name="${1:-}"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "invalid module name"
+  local path="$MODULE_DIR/$name.sh"
+  [[ -f "$path" && ! -L "$path" ]] || die "unknown module: $name"
+  printf '%s\n' "$path"
+}
+
+list_modules() {
+  printf '%-16s %s\n' MODULE DESCRIPTION
+  printf '%-16s %s\n' '------' '-----------'
+  local file name description
+  shopt -s nullglob
+  for file in "$MODULE_DIR"/*.sh; do
+    name="$(basename "$file" .sh)"
+    description="$(sed -n 's/^# description: //p' "$file" | head -1)"
+    printf '%-16s %s\n' "$name" "${description:-No description}"
+  done
+}
+
+doctor() {
+  local failed=0 cmd
+  for cmd in bash git curl jq wp; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      printf '\033[32m✓\033[0m %-10s %s\n' "$cmd" "$(command -v "$cmd")"
+    else
+      printf '\033[33m!\033[0m %-10s not found%s\n' "$cmd" "$([[ "$cmd" == wp ]] && printf ' (optional: required by wp2shell)' || true)"
+      [[ "$cmd" == bash || "$cmd" == git ]] && failed=1
+    fi
+  done
+  return "$failed"
+}
+
+command="${1:-help}"; shift || true
+case "$command" in
+  list) list_modules ;;
+  doctor) doctor ;;
+  run)
+    name="${1:-}"; [[ -n "$name" ]] || die "usage: all2shell run <module> [arguments...]"
+    shift
+    path="$(module_path "$name")"
+    info "running $name"
+    exec bash "$path" "$@"
+    ;;
+  help)
+    if [[ $# -eq 0 ]]; then usage; else bash "$(module_path "$1")" --help; fi
+    ;;
+  version|--version|-v) printf 'all2shell %s\n' "$ALL2SHELL_VERSION" ;;
+  --help|-h) usage ;;
+  *) die "unknown command: $command (try: all2shell help)" ;;
+esac
