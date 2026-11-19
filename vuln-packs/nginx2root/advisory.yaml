@@ -1,0 +1,106 @@
+# all2shell advisory pack — machine-readable manifest
+# Defensive use only: exposure assessment, remediation and fix verification.
+# This pack contains NO exploit payload and NO exploitation steps.
+id: nginx2root
+name: nginx remote code execution cluster (nginx2root)
+aka: [nginx2root]
+cves:
+  - CVE-2026-123007
+  - CVE-2026-123633
+  - CVE-2026-123634
+  - CVE-2026-121810
+  - CVE-2026-113425
+cvss: 9.2
+disclosed: 2026-11-18
+component: nginx (HTTP/2, HTTP/3, request-time resolver, mail proxy)
+summary: >
+  A cluster of five independent nginx memory-safety flaws, each reaching unauthenticated
+  remote code execution with nginx worker privileges in a specific configuration. The
+  headline flaw, CVE-2026-123007, is an HTTP/2 send-window integer underflow present in
+  every release since HTTP/2 shipped (1.9.5, 2015). A separate Linux kernel SCTP flaw was
+  chained to host root in the researchers' tests; assess the kernel separately.
+
+# Per-CVE affected ranges and the configuration that exposes each path.
+paths:
+  - cve: CVE-2026-123007
+    bug: HTTP/2 send_window integer underflow
+    affected: ">=1.9.5 <=1.31.8"
+    requires: "HTTP/2 enabled"
+    blocked_by_disabling_http2: true
+  - cve: CVE-2026-123633
+    bug: HTTP/2 connection use-after-free
+    affected: ">=1.19.7 <=1.31.8"
+    requires: "HTTP/2 with requests forwarded to an upstream (proxy)"
+    blocked_by_disabling_http2: true
+  - cve: CVE-2026-123634
+    bug: resolver use-after-free
+    affected: ">=1.13.4 <=1.31.8"
+    requires: "resolver + request-derived proxy_pass destination + mirror (or other subrequests)"
+    blocked_by_disabling_http2: false
+  - cve: CVE-2026-121810
+    bug: HTTP/3 (QUIC) use-after-free
+    affected: ">=1.25.0 <=1.31.8"
+    requires: "HTTP/3 with requests forwarded to an upstream"
+    blocked_by_disabling_http2: false
+  - cve: CVE-2026-113425
+    bug: mail proxy use-after-free
+    affected: ">=0.5.33 <=1.31.8"
+    requires: "mail proxy with 'proxy on' and auth_http"
+    blocked_by_disabling_http2: false
+
+fixed:
+  - "1.31.9"   # mainline
+  - "1.30.7"   # stable
+not_affected: "<=1.9.4 (for CVE-2026-123007; other paths have their own first-affected release)"
+note: >
+  The October 2026 release (1.31.7 / 1.30.6) fixed a DIFFERENT set of CVEs and does NOT
+  address nginx2root. A distribution package may backport the fix without changing the
+  version string, so confirm against the vendor advisory, not nginx -v alone.
+
+exposure_check:
+  intrusive: false
+  module: nginxexposure      # all2shell run nginxexposure [--target HOST] --yes-authorized
+  method: >
+    Host-local checks (nginx -v, nginx -V for the HTTP/2 and HTTP/3 modules, nginx -T for
+    enabled directives) plus an optional external ALPN probe to see whether HTTP/2 is
+    reachable. It reads version and configuration only; it sends no exploit frames.
+
+mitigations:
+  - id: update
+    recommended: true
+    action: "Update to 1.31.9 (mainline) or 1.30.7 (stable), or a vendor build that lists all five CVEs. Restart nginx (a reload does not swap the running binary)."
+  - id: disable-http2
+    action: "Set 'http2 off;' on affected server blocks (>=1.25.1) or drop the http2 parameter from listen (older). Blocks CVE-2026-123007 and CVE-2026-123633 only."
+  - id: fixed-upstreams
+    action: "For CVE-2026-123634: point proxy_pass at a fixed upstream group to remove request-time DNS, instead of relying on mirror_request_body on."
+  - id: disable-http3
+    action: "For CVE-2026-121810: remove QUIC listeners, set 'http3 off;', advertise Alt-Svc 'clear', and block UDP/443 at the firewall."
+  - id: restrict-mail-proxy
+    action: "For CVE-2026-113425: bind IMAP/POP3/SMTP listeners to loopback or firewall them to trusted clients."
+
+verification:
+  - "Re-run `nginxexposure`: version must be a fixed release (or a confirmed backport), or the affected feature (HTTP/2, HTTP/3, request-time resolver+mirror, mail auth_http) must be disabled."
+  - "After updating, confirm old workers exited (ps shows no 'worker process is shutting down'); a reload alone leaves open HTTP/2 sessions on old workers."
+
+detection:
+  nuclei: detect.nuclei.yaml
+  mitre:
+    - T1190   # Exploit Public-Facing Application
+    - T1059   # Command and Scripting Interpreter
+  behavioral: >
+    CVE-2026-123007 leaves little in access logs (WINDOW_UPDATE/RST_STREAM control frames
+    are not logged and are TLS-encrypted). The strongest signal is an nginx worker executing
+    an external program — a worker has no reason to run /bin/sh. Add an auditd execve rule
+    scoped to the worker UID; also watch for abnormal worker exits (signal 11 / segfault,
+    coredumpctl) and long-lived HTTP/2 connections with large inbound byte counts but tiny
+    logged request lengths.
+  host_hunt:
+    - "auditd: -a always,exit -F arch=b64 -S execve,execveat -F euid=<nginx_worker_uid> -k nginx_worker_exec"
+    - "grep -Ei 'worker process.*exited|signal 11|segfault' /var/log/nginx/error.log"
+    - "ss -tinp state established '( sport = :443 )' — compare bytes_received growth across two samples"
+
+references:
+  - https://nginx2root.com/        # Xint / Theori research
+  - https://www.wiz.io/blog         # Wiz Research (CVE-2026-123633, CVE-2026-123007)
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-123007
+  - https://my.f5.com/manage/s/     # F5 / nginx security advisory

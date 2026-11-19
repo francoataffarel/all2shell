@@ -4,9 +4,10 @@ set -Eeuo pipefail
 ALL2SHELL_VERSION="0.1.0"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_DIR="${ALL2SHELL_MODULE_DIR:-$ROOT_DIR/modules}"
+PACK_DIR="${ALL2SHELL_PACK_DIR:-$ROOT_DIR/vuln-packs}"
 
 die() { printf 'all2shell: %s\n' "$*" >&2; exit 1; }
-info() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+info() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 
 usage() {
   cat <<'EOF'
@@ -20,6 +21,8 @@ One CLI. Every workflow. Zero mystery.
 
 Usage:
   all2shell list                         List available modules
+  all2shell advisories                   List vulnerability advisory packs
+  all2shell advisory <id>                Show an advisory pack runbook
   all2shell doctor                       Check local dependencies
   all2shell run <module> [arguments...]  Run a module
   all2shell help [module]                Show help
@@ -27,6 +30,7 @@ Usage:
 
 Environment:
   ALL2SHELL_MODULE_DIR  Override the modules directory
+  ALL2SHELL_PACK_DIR    Override the advisory packs directory
 EOF
 }
 
@@ -63,9 +67,38 @@ doctor() {
   return "$failed"
 }
 
+advisory_path() {
+  local name="${1:-}"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "invalid advisory name"
+  local dir="$PACK_DIR/$name"
+  [[ -d "$dir" && ! -L "$dir" ]] || die "unknown advisory: $name"
+  printf '%s\n' "$dir"
+}
+
+list_advisories() {
+  printf '%-12s %-4s %s\n' PACK CVEs NAME
+  printf '%-12s %-4s %s\n' '----' '----' '----'
+  local dir id name count
+  shopt -s nullglob
+  for dir in "$PACK_DIR"/*/; do
+    [[ -f "${dir}advisory.yaml" ]] || continue
+    id="$(basename "$dir")"
+    name="$(sed -n 's/^name: *//p' "${dir}advisory.yaml" | head -1)"
+    count="$(sed -n '/^cves:/,/^[a-z][a-z0-9_]*:/p' "${dir}advisory.yaml" | grep -oE 'CVE-[0-9]{4}-[0-9]+' | sort -u | wc -l | tr -d ' ')"
+    printf '%-12s %-4s %s\n' "$id" "$count" "${name:-No name}"
+  done
+}
+
+show_advisory() {
+  local dir; dir="$(advisory_path "${1:-}")"
+  if [[ -f "$dir/README.md" ]]; then cat "$dir/README.md"; else cat "$dir/advisory.yaml"; fi
+}
+
 command="${1:-help}"; shift || true
 case "$command" in
   list) list_modules ;;
+  advisories) list_advisories ;;
+  advisory) name="${1:-}"; [[ -n "$name" ]] || die "usage: all2shell advisory <id>"; show_advisory "$name" ;;
   doctor) doctor ;;
   run)
     name="${1:-}"; [[ -n "$name" ]] || die "usage: all2shell run <module> [arguments...]"

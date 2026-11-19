@@ -1,0 +1,64 @@
+id: php2shell-exposure
+
+# Non-intrusive PHP version fingerprint for PHP2Shell (CVE-2026-109618, CVE-2026-109619).
+# DETECTION ONLY: it reads the PHP version from response headers and flags builds below the
+# branch fix. It sends no upload-progress payload and no exploit request.
+#
+# Coverage caveat: expose_php=Off and reverse proxies hide the PHP version. A miss is not
+# proof of safety — confirm on the host with the `phpexposure` module.
+#
+# Validate before use:  nuclei -validate -t detect.nuclei.yaml
+
+info:
+  name: PHP2Shell (CVE-2026-109618/109619) — version exposure fingerprint
+  author: all2shell
+  severity: critical
+  description: |
+    Flags servers whose advertised PHP version is below the PHP2Shell fix for its branch
+    (8.5.12 / 8.4.27 / 8.3.36 / 8.2.35). PHP core RCE; secure application code does not help.
+  remediation: |
+    Update PHP to the fixed release for your branch. As a partial stopgap set
+    session.upload_progress.enabled=0 before request parsing, then restart workers.
+  reference:
+    - https://nvd.nist.gov/vuln/detail/CVE-2026-109618
+    - https://nvd.nist.gov/vuln/detail/CVE-2026-109619
+  classification:
+    cve-id: CVE-2026-109618,CVE-2026-109619
+    cvss-score: 9.2
+  metadata:
+    max-request: 1
+    shodan-query: 'http.component:"PHP"'
+  tags: cve,cve2026,php,php2shell,rce,exposure,safe,intrusive:false
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    host-redirects: true
+    max-redirects: 2
+
+    extractors:
+      - type: regex
+        name: php_version
+        part: header
+        group: 1
+        internal: true
+        regex:
+          - 'PHP/([0-9]+\.[0-9]+\.[0-9]+)'
+      - type: regex
+        name: php_version
+        part: header
+        group: 1
+        regex:
+          - 'PHP/([0-9]+\.[0-9]+\.[0-9]+)'
+
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: header
+        regex:
+          - 'PHP/[0-9]'
+      - type: dsl
+        # Below the branch fix = exposed. Branch boundaries keep each comparison on-branch.
+        dsl:
+          - "compare_versions(php_version, '>= 8.5.0', '< 8.5.12') || compare_versions(php_version, '>= 8.4.0', '< 8.4.27') || compare_versions(php_version, '>= 8.3.0', '< 8.3.36') || compare_versions(php_version, '>= 8.2.0', '< 8.2.35') || compare_versions(php_version, '< 8.2.0')"

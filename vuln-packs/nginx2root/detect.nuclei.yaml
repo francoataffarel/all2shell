@@ -1,0 +1,65 @@
+id: nginx2root-exposure
+
+# Non-intrusive version fingerprint for the nginx2root RCE cluster, headline flaw
+# CVE-2026-123007 (HTTP/2 send-window integer underflow). DETECTION ONLY: it reads the
+# Server banner and flags the affected version range. It sends no HTTP/2 control frames
+# and no exploit payload.
+#
+# Coverage caveat: many servers set `server_tokens off` and expose no version. A miss is
+# not proof of safety. HTTP/2 reachability and backported fixes must be confirmed on the
+# host with the `nginxexposure` module.
+#
+# Validate before use:  nuclei -validate -t detect.nuclei.yaml
+
+info:
+  name: nginx2root (CVE-2026-123007) — version exposure fingerprint
+  author: all2shell
+  severity: critical
+  description: |
+    Flags nginx servers whose advertised version falls in the CVE-2026-123007 affected
+    range (1.9.5-1.31.8). The flaw additionally requires HTTP/2 to be enabled and reachable,
+    which this template does not confirm — pair it with a host-local check.
+  remediation: |
+    Update to 1.31.9 (mainline) or 1.30.7 (stable). As a temporary control, disable HTTP/2
+    on affected listeners. Confirm backported fixes against the vendor advisory.
+  reference:
+    - https://nvd.nist.gov/vuln/detail/CVE-2026-123007
+  classification:
+    cve-id: CVE-2026-123007
+    cvss-score: 9.2
+  metadata:
+    max-request: 1
+    shodan-query: 'product:nginx'
+  tags: cve,cve2026,nginx,nginx2root,rce,exposure,safe,intrusive:false
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    host-redirects: true
+    max-redirects: 2
+
+    extractors:
+      - type: regex
+        name: nginx_version
+        part: header
+        group: 1
+        internal: true
+        regex:
+          - '[Ss]erver:\s*nginx/([0-9]+\.[0-9]+\.[0-9]+)'
+      - type: regex
+        name: nginx_version
+        part: header
+        group: 1
+        regex:
+          - 'nginx/([0-9]+\.[0-9]+\.[0-9]+)'
+
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: header
+        regex:
+          - 'nginx/[0-9]'
+      - type: dsl
+        dsl:
+          - "compare_versions(nginx_version, '>= 1.9.5', '<= 1.31.8')"

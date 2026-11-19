@@ -1,0 +1,86 @@
+# all2shell advisory pack — machine-readable manifest
+# Defensive use only: exposure assessment, remediation and fix verification.
+# This pack contains NO exploit payload and NO exploitation steps.
+id: java4shell
+name: OpenJDK Base64 decoder memory corruption (Java4Shell)
+aka: [java4shell]
+cves:
+  - CVE-2026-114938
+cvss: 9.2
+disclosed: 2026-11-17
+component: OpenJDK HotSpot — x86-64 Base64 decode intrinsic
+summary: >
+  A memory-corruption flaw in HotSpot's hand-written AVX-512 Base64 decoder. A short
+  malformed Base64 string from an unauthenticated attacker writes past the decode buffer.
+  Crashing a vulnerable service is easy; remote code execution has only been demonstrated
+  in controlled environments and needs specific hardware plus an exposed decoder and a
+  per-application exploit. Exposure is gated on the CPU: only x86-64 with AVX-512 VBMI runs
+  the vulnerable code.
+
+hardware_gate:
+  required_cpu_flags: [avx512f, avx512bw, avx512vbmi, bmi2]   # all four present = affected hardware
+  affected_cpus: "Intel Xeon Ice Lake / Sapphire Rapids / Emerald Rapids / Granite Rapids; AMD EPYC & Ryzen Zen 4+"
+  not_affected: "ARM64 (Graviton, Ampere); older x86 (Skylake-SP, Cascade Lake, Zen 2/3); Java 8 and 11"
+
+# Affected / fixed by runtime. Java 8/11 and OpenJDK 17.0.0-17.0.5 do not contain the code.
+runtimes:
+  - runtime: OpenJDK 17
+    affected: ">=17.0.6 <=17.0.21.0.3"
+    fixed: "17.0.21.1"
+  - runtime: OpenJDK 21
+    affected: "<=21.0.13.0.3"
+    fixed: "21.0.13.1"
+  - runtime: OpenJDK 25
+    affected: "<=25.0.5.0.3"
+    fixed: "25.0.5.1"
+  - runtime: OpenJDK 27
+    affected: "<=27.0.1.0.3"
+    fixed: "27.0.1.1"
+  - runtime: Oracle Java SE 8 (performance build)
+    affected: "8u511b33-perf"
+    fixed: "8u513"
+  - runtime: Amazon Corretto 17
+    affected: ">=17.0.6"
+    fixed: "17.0.21.1.2"
+note: >
+  Many products ship their own runtime (Jira, Confluence, Jenkins images, Keycloak,
+  Elasticsearch), so the JDK that `java -version` reports on the host may not be the one a
+  service uses. Rebuild container images on patched bases and replace embedded JREs.
+
+exposure_check:
+  intrusive: false
+  module: javaexposure      # all2shell run javaexposure --yes-authorized
+  method: >
+    Host-local only: read the JDK version/vendor (java -version) and the CPU flags
+    (/proc/cpuinfo). A host is exposed only if an affected runtime runs on a CPU that has
+    all four AVX-512 flags. No network traffic, no decoder input.
+
+mitigations:
+  - id: update
+    recommended: true
+    action: "Move to the November 17, 2026 OpenJDK / Oracle build or your vendor's patched distribution. Update bundled runtimes too."
+  - id: disable-intrinsic
+    action: "Start the JVM with -XX:-UseBASE64Intrinsics to disable only the vulnerable decoder while keeping other AVX-512 optimisations."
+  - id: disable-avx512
+    action: "Alternatively -XX:UseAVX=2 disables AVX-512 entirely. Apply only on x86-64 hosts — OpenJDK on ARM does not recognise the flag and will fail to start."
+
+verification:
+  - "Re-run `javaexposure`: the runtime must be a fixed build, OR the CPU must lack an AVX-512 VBMI flag, OR the mitigation flag must be active in the JVM's command line."
+  - "Confirm the flag reaches the right process: check the running JVM's args, not just a default config file."
+
+detection:
+  nuclei: none          # exposure is host-local (JDK build + CPU), not a safe remote signal
+  behavioral: >
+    Look for unexpected JVM crashes and hs_err_pid*.log files on affected hosts, and for
+    bursts of IllegalArgumentException from java.util.Base64.Decoder on inputs ending in '='.
+    If seen on an exposed service, treat secrets in that JVM's memory as compromised and
+    rotate signing keys, tokens and credentials.
+  warning: >
+    Do NOT run proof-of-concept 'Java4Shell RCE' repositories from GitHub. Fake PoCs for
+    high-profile CVEs routinely carry malware aimed at defenders. Confirm exposure with the
+    host-local check in this pack, not with third-party exploit code.
+
+references:
+  - https://www.ox.security/   # OX Research analysis
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-114938
+  - https://openjdk.org/groups/vulnerability/advisories/
