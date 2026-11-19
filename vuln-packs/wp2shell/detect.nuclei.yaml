@@ -1,0 +1,73 @@
+id: wp2shell-exposure
+
+# Non-intrusive exposure check for the wp2shell WordPress Core pre-auth RCE
+# (CVE-2026-63030, CVE-2026-60137). This template is DETECTION ONLY: it fingerprints
+# the WordPress version and confirms the REST index advertises the /batch/v1 route.
+# It never sends a batch request, a nested sub-request, or an SQL-injection payload.
+#
+# Validate before use:  nuclei -validate -t detect.nuclei.yaml
+# Run:                   nuclei -t detect.nuclei.yaml -u https://your-wordpress-site
+
+info:
+  name: WordPress Core batch pre-auth RCE (wp2shell) — exposure check
+  author: all2shell
+  severity: critical
+  description: |
+    Flags WordPress installations whose version falls in the wp2shell full pre-auth RCE
+    ranges (6.9.0-6.9.4, 7.0.0-7.0.1) and that expose the REST /batch/v1 route to
+    anonymous users. Read-only exposure signal, not exploitation.
+  remediation: |
+    Update to 7.0.2 (or 6.9.5 on the 6.9 branch). As a temporary control, require
+    authentication for /wp-json/batch/v1 and ?rest_route=/batch/v1 at the WAF or via an
+    mu-plugin until the update is applied.
+  reference:
+    - https://nvd.nist.gov/vuln/detail/CVE-2026-63030
+    - https://nvd.nist.gov/vuln/detail/CVE-2026-60137
+  classification:
+    cve-id: CVE-2026-63030,CVE-2026-60137
+    cvss-metrics: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H
+    cvss-score: 9.2
+  metadata:
+    max-request: 2
+    shodan-query: 'http.component:"WordPress"'
+  tags: cve,cve2026,wordpress,wp2shell,rce,exposure,safe,intrusive:false
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/wp-json/"
+      - "{{BaseURL}}/"
+    stop-at-first-match: false
+    host-redirects: true
+    max-redirects: 2
+
+    extractors:
+      - type: regex
+        name: wp_version
+        part: body
+        group: 1
+        internal: true          # used by the matcher dsl below
+        regex:
+          - 'content="WordPress ([0-9]+\.[0-9]+(?:\.[0-9]+)?)"'
+          - 'wordpress\.org/\?v=([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+      - type: regex
+        name: wp_version
+        part: body
+        group: 1
+        regex:
+          - 'content="WordPress ([0-9]+\.[0-9]+(?:\.[0-9]+)?)"'
+          - 'wordpress\.org/\?v=([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+
+    matchers-condition: and
+    matchers:
+      # (1) The anonymous REST index advertises the batch route.
+      - type: word
+        part: body
+        words:
+          - '"/batch/v1"'
+          - 'batch/v1'
+        condition: or
+      # (2) The fingerprinted version is inside a full pre-auth RCE range.
+      - type: dsl
+        dsl:
+          - "compare_versions(wp_version, '>= 6.9.0', '<= 6.9.4') || compare_versions(wp_version, '>= 7.0.0', '<= 7.0.1')"

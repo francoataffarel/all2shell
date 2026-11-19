@@ -1,0 +1,80 @@
+# all2shell advisory pack — machine-readable manifest
+# Defensive use only: exposure assessment, remediation and fix verification.
+# This pack contains NO exploit payload and NO exploitation steps.
+id: wp2shell
+name: WordPress Core REST batch pre-authentication RCE
+aka: [wp2shell]
+cves:
+  - CVE-2026-63030
+  - CVE-2026-60137
+cvss: 9.2
+disclosed: 2026-07-17
+component: WordPress Core — REST batch endpoint (/wp-json/batch/v1, /?rest_route=/batch/v1)
+summary: >
+  Pre-authentication remote code execution in stock WordPress Core. A route-confusion
+  bug in REST batch handling reaches a pre-auth SQL injection primitive; public tooling
+  escalates that to administrator creation and plugin-upload code execution. No plugins
+  are required and an anonymous user can reach it on a default install.
+
+# Version ranges are expressed as inclusive sets for the exposure checker.
+affected:
+  full_rce:
+    - ">=6.9.0 <=6.9.4"
+    - ">=7.0.0 <=7.0.1"
+  sqli_only:                 # SQL injection reachable, full RCE chain not demonstrated on this branch
+    - ">=6.8.0 <=6.8.5"
+fixed:
+  - "6.8.6"                  # SQL injection fixed on the 6.8 branch
+  - "6.9.5"                  # fix for the 6.9 branch
+  - "7.0.2"                  # fix for the 7.0 branch
+not_affected: "<6.8.0"
+
+exposure_check:
+  intrusive: false
+  module: wpexposure          # all2shell run wpexposure --target URL --yes-authorized
+  method: >
+    Fingerprint the WordPress version (generator meta / RSS generator tag) and confirm
+    whether the REST index advertises the /batch/v1 route to anonymous users. The check
+    is read-only: it never sends a batch request, a nested sub-request, or an SQLi probe.
+
+mitigations:
+  - id: update
+    recommended: true
+    action: "Update to 7.0.2 (or 6.9.5 on the 6.9 branch). This is the only complete fix."
+  - id: waf-block
+    action: "Block unauthenticated /wp-json/batch/v1 AND ?rest_route=/batch/v1 at the WAF/edge (both patterns)."
+  - id: mu-plugin
+    action: "Drop mitigation/disable-unauth-batch-api.php into wp-content/mu-plugins/ to require auth for the batch route."
+    note: "Temporary emergency control. Legitimate batch consumers that call the API anonymously will break."
+
+verification:
+  - "Re-run `wpexposure`: the version must be a fixed release, OR the batch route must reject anonymous callers (HTTP 401)."
+  - "Confirm no unexpected administrator accounts were created during the exposure window."
+
+detection:
+  nuclei: detect.nuclei.yaml
+  mitre:
+    - T1190   # Exploit Public-Facing Application
+    - T1505.003  # Server Software Component: Web Shell
+    - T1059   # Command and Scripting Interpreter
+  network_iocs:
+    - "POST /?rest_route=/batch/v1 or /wp-json/batch/v1 carrying a nested JSON requests array"
+    - "HTTP 207 Multi-Status responses on batch requests (supporting signal, not standalone)"
+    - "Batch traffic with User-Agent: wp2shell / cve-2026-63030"
+    - "Follow-on hits to /wp-admin/update.php?action=upload-plugin or /wp-json/wp/v2/users?context=edit"
+  host_iocs:
+    - "Directories matching wp-content/plugins/wp2shell_<hex>/ (fragile: slug is randomised/renamable)"
+    - "temp-write-test-* probe files under wp-content/"
+    - "New .php written under wp-content/plugins/ or wp-content/cache/"
+  behavioral: >
+    The durable signal is a web-server process (apache2 / nginx / php-fpm / lsphp) spawning a
+    shell (e.g. sh -c id; whoami; hostname) from a wp-content/plugins working directory. Prefer
+    behavioural detection over the hex plugin slug, which changes every run.
+  references:
+    - "Elastic Security Labs — detection rules: 'PHP File Creation in WordPress Plugin Directory', 'Payload Execution by Web Server', 'Suspicious/Unusual Command Execution via Web Server'"
+
+references:
+  - https://www.searchlight.cyber/   # Searchlight Cyber advisory (Adam Kues)
+  - https://www.elastic.co/security-labs/
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-63030
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-60137
