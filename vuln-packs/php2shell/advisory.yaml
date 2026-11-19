@@ -1,0 +1,83 @@
+# all2shell advisory pack — machine-readable manifest
+# Defensive use only: exposure assessment, remediation and fix verification.
+# This pack contains NO exploit payload and NO exploitation steps.
+id: php2shell
+name: PHP core unauthenticated RCE pair (PHP2Shell)
+aka: [php2shell]
+cves:
+  - CVE-2026-109618
+  - CVE-2026-109619
+cvss: 9.2
+disclosed: 2026-10-21
+component: PHP core request handling (also PHP-FPM, php-cgi, FrankenPHP, LiteSpeed)
+summary: >
+  Two critical PHP-core flaws, collectively PHP2Shell, each enabling unauthenticated remote
+  code execution as the web-worker account. CVE-2026-109618 is RCE via out-of-memory
+  corruption; CVE-2026-109619 is RCE via stale global state (a use-after-free). The bugs are
+  in the PHP runtime itself, so secure application code does not protect you. Highest risk on
+  Apache mod_php, where the attack triggers before any application code runs. Exploited in
+  the wild.
+
+# Fixed on 2026-10-21. Every release before these on a branch is affected; end-of-life
+# branches (<8.2) get no upstream fix and must be moved to a supported branch.
+branches:
+  - branch: "8.5"
+    fixed: "8.5.12"
+  - branch: "8.4"
+    fixed: "8.4.27"
+  - branch: "8.3"
+    fixed: "8.3.36"
+  - branch: "8.2"
+    fixed: "8.2.35"
+eol_branches: "<8.2 (7.x, 8.0, 8.1) — no upstream fix; upgrade to a supported branch"
+note: >
+  A distribution may backport the fix without changing the upstream version string. Confirm
+  the full package revision against your vendor's advisory, and verify the runtime each
+  service actually uses — not just the CLI build.
+
+related:
+  - cve: CVE-2026-115560
+    disclosed: 2026-10-23
+    status: "mitigation-only (handled in the next regular release)"
+    note: >
+      A separate, narrow session-upload-progress + runtime serialize_handler path that also
+      affects the fixed releases. Same stopgap: session.upload_progress.enabled=0.
+
+exposure_check:
+  intrusive: false
+  module: phpexposure      # all2shell run phpexposure [--target URL] --yes-authorized
+  method: >
+    Host-local: read the PHP version per branch (php -v) and whether session.upload_progress
+    is enabled (php -i). Optional remote: fingerprint the PHP version from the Server /
+    X-Powered-By header. Reads versions and headers only; sends no exploit request.
+
+mitigations:
+  - id: update
+    recommended: true
+    action: "Update to 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35 (or your distro's patched package). The only complete fix. Restart FPM/Apache workers."
+  - id: disable-upload-progress
+    action: "Set session.upload_progress.enabled=0 before request parsing (php.ini or FPM pool). Partial: covers the 109619 path and CVE-2026-115560; it does NOT repair every path."
+    file: "mitigation/99-php2shell.ini"
+  - id: eol-upgrade
+    action: "On an end-of-life branch (<8.2), move to a supported branch; no patch is coming."
+
+verification:
+  - "Re-run `phpexposure`: the version must be at or above the branch's fixed release."
+  - "phpinfo()'s 'Loaded Configuration File' must be the file you edited, and workers must have restarted (the mitigation is often applied to the CLI php.ini by mistake)."
+  - "Confirm the running deployment, not just the CLI: each site's FPM pool / mod_php build."
+
+detection:
+  nuclei: detect.nuclei.yaml
+  mitre:
+    - T1190   # Exploit Public-Facing Application
+    - T1059
+  behavioral: >
+    As with the WordPress chain, the durable signal is a web-server/PHP worker
+    (apache2 / php-fpm / lsphp) spawning a shell and running discovery commands. Review
+    access logs from ~October 17, 2026 onward on internet-facing PHP services.
+
+references:
+  - https://www.php.net/           # PHP project advisory (2026-10-21)
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-109618
+  - https://nvd.nist.gov/vuln/detail/CVE-2026-109619
+  - https://github.com/advisories/GHSA-6wmf-4rv5-p3rp   # CVE-2026-109619
